@@ -16,14 +16,23 @@ use windows_sys::Win32::System::Threading::*;
 /// PowerShell's `cd` never tells Windows, so hc couldn't see its folder: each
 /// prompt does, after the person's own prompt ran (it reads `$?`).
 pub fn own_shell() -> Vec<String> {
-    let on_path = |exe: &str| {
-        std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(exe).is_file()))
-    };
-    let exe = if on_path("pwsh.exe") { "pwsh.exe" } else { "powershell.exe" };
+    // Child environments refresh PATH from Windows, which can select a different,
+    // 32-bit pwsh after this choice. Its PEB/cwd is not readable by our 64-bit probe.
+    let exe = ["ProgramW6432", "ProgramFiles"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(|root| std::path::PathBuf::from(root).join("PowerShell/7/pwsh.exe"))
+        .chain(
+            std::env::var_os("SystemRoot")
+                .map(|root| std::path::PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe")),
+        )
+        .find(|path| path.is_file())
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "powershell.exe".into());
     let hook = "$global:__hc_prompt = $function:prompt; function global:prompt { $p = & $global:__hc_prompt; \
                 $l = $ExecutionContext.SessionState.Path.CurrentLocation; \
                 if ($l.Provider.Name -eq 'FileSystem') { try { [Environment]::CurrentDirectory = $l.ProviderPath } catch {} }; $p }";
-    [exe, "-NoExit", "-Command", hook].map(String::from).to_vec()
+    vec![exe, "-NoExit".into(), "-Command".into(), hook.into()]
 }
 
 /// Windows has no display to reach: nothing to drop.

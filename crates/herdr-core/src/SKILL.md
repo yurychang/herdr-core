@@ -2,6 +2,9 @@
 
 ## Guarded input extension (my-herdr fork)
 
+On Windows the default shell is pinned to the installed native 64-bit PowerShell executable, keeping cwd tracking available when child environments refresh PATH. Explicit configured shell commands remain unchanged.
+Console attach reads Unicode and preserves split UTF-16 surrogate pairs; redirected input remains a raw byte stream.
+
 The additive RPCs `terminal.input_target`, `terminal.submit`, `terminal.submission`, `terminal.submission.resolve` and `terminal.input_stop` advertise `durable_submit_v1` in hello. Capture a local target's Core/holder/PID/birth/session/input revision; submit one immutable ID and payload. Duplicate IDs never write again. Query receipts after timeout/disconnect. `written` proves the PTY write sequence only; interrupted delivery is `unknown` and blocks further custom input until reviewed/resolved. Never interpret a missing receipt as proof that nothing was typed. Ordinary send/keys/viewer operations remain supported and invalidate prior input revisions.
 
 The current manual for herdr-core's CLI, `hc`. It is not `herdr`, the older

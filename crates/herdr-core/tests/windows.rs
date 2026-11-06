@@ -288,20 +288,21 @@ fn an_update_that_cannot_finish_puts_everything_back() {
 
 #[test]
 fn attach_types_non_ascii_text_unchanged() {
-    // The console attach runs in reads keys in its code page (437 here).
+    // Keep the receiving fixture Unicode-capable on every OEM code page.
+    // CP950 best-fits é to e before ReadLine; that is not an attach conversion.
     let s = Session::new();
     let got = s.root.join("got.txt");
     let script = format!(
-        "Write-Host ready; $l = [Console]::ReadLine(); [IO.File]::WriteAllText('{}', (($l.ToCharArray() | % {{ [int]$_ }}) -join ','))",
+        "[Console]::InputEncoding = [Text.UTF8Encoding]::new($false); Write-Host ready; $l = [Console]::ReadLine(); [IO.File]::WriteAllText('{}', (($l.ToCharArray() | % {{ [int]$_ }}) -join ','))",
         got.display()
     );
     let inner = s.bg(&["powershell", "-NoProfile", "-Command", &script]);
     s.shows(&inner, "ready");
     let outer = s.bg(&[BIN, "attach", &inner]);
     s.shows(&outer, "ready");
-    s.json(&["send", &outer, "é"]);
+    s.json(&["send", &outer, "é中🙂é"]);
     assert_eq!(s.json(&["wait", &inner, "--timeout", "15"])["exit_code"], 0, "the line was read and written");
-    assert_eq!(std::fs::read_to_string(&got).unwrap(), "233");
+    assert_eq!(std::fs::read_to_string(&got).unwrap(), "233,20013,55357,56898,101,769");
 }
 
 #[test]
@@ -528,7 +529,9 @@ fn a_shell_line_runs_in_cmd_quotes_and_all_and_no_program_is_powershell() {
     let _ = conn.wait();
     let reply: Value = serde_json::from_str(&reply).unwrap();
     let shell = reply["result"]["argv"][0].as_str().unwrap_or_default().to_string();
-    assert!(shell == "pwsh.exe" || shell == "powershell.exe", "{reply}");
+    let name = Path::new(&shell).file_name().and_then(|s| s.to_str()).unwrap_or_default();
+    assert!(name == "pwsh.exe" || name == "powershell.exe", "{reply}");
+    assert!(Path::new(&shell).is_absolute(), "shell must not change when child PATH refreshes: {reply}");
 }
 
 #[test]
@@ -587,7 +590,8 @@ fn interrupt_is_ctrl_c_the_program_takes() {
     // parent), a program must still get it.
     let s = Session::new();
     let t = s.bg(&["ping", "-t", "127.0.0.1"]);
-    s.shows(&t, "Reply from");
+    // The reply label is localized (for example, 回覆自 on Traditional Chinese Windows).
+    s.shows(&t, "127.0.0.1");
     s.json(&["interrupt", &t, "--timeout", "5"]);
     wait_until("ping stopped", || s.json(&["get", &t])["state"] == "finished");
 }

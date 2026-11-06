@@ -1095,6 +1095,7 @@ pub mod console {
 
     impl RawMode {
         pub fn enter() -> RawMode {
+            PENDING_SURROGATE.with(|pending| pending.set(None));
             unsafe {
                 let (mut input, mut output) = (0u32, 0u32);
                 if GetConsoleMode(std(STD_INPUT_HANDLE), &mut input) == 0
@@ -1121,6 +1122,7 @@ pub mod console {
 
     impl Drop for RawMode {
         fn drop(&mut self) {
+            PENDING_SURROGATE.with(|pending| pending.set(None));
             if let Some((input, output, cp_out, cp_in)) = self.0 {
                 unsafe {
                     SetConsoleMode(std(STD_INPUT_HANDLE), input);
@@ -1184,6 +1186,14 @@ pub mod console {
                     ReadConsoleInputW(h, events.as_mut_ptr(), n, &mut n);
                     return Some(Vec::new());
                 }
+                // Read Unicode before code-page conversion can split a surrogate pair.
+                // ReadConsoleW observes the same VT input modes as ReadFile.
+                let mut buf = [0u16; 4096];
+                let mut got = 0u32;
+                if ReadConsoleW(h, buf.as_mut_ptr().cast(), buf.len() as u32, &mut got, null()) == 0 || got == 0 {
+                    return None;
+                }
+                return Some(console_utf8(&buf[..got as usize]));
             }
             let mut buf = [0u8; 8192];
             let mut got = 0u32;
@@ -1191,6 +1201,28 @@ pub mod console {
                 return None;
             }
             Some(buf[..got as usize].to_vec())
+        }
+    }
+
+    thread_local! {
+        static PENDING_SURROGATE: std::cell::Cell<Option<u16>> = const { std::cell::Cell::new(None) };
+    }
+    fn console_utf8(input: &[u16]) -> Vec<u8> {
+        PENDING_SURROGATE.with(|pending| {
+            let mut units: Vec<u16> = pending.take().into_iter().chain(input.iter().copied()).collect();
+            if units.last().is_some_and(|u| (0xD800..=0xDBFF).contains(u)) {
+                pending.set(units.pop());
+            }
+            String::from_utf16_lossy(&units).into_bytes()
+        })
+    }
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn console_unicode_survives_split_surrogate_pairs() {
+            let text = "é中🙂é";
+            let bytes: Vec<_> = text.encode_utf16().flat_map(|u| super::console_utf8(&[u])).collect();
+            assert_eq!(String::from_utf8(bytes).unwrap(), text);
         }
     }
 }
