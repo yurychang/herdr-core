@@ -138,6 +138,9 @@ impl Core {
             })?;
             t.check_program()?;
             let prepared = prepare(&st, t)?;
+            if let Some(t) = st.reg.terminals.get_mut(&id) {
+                t.input_revision = t.input_revision.saturating_add(1);
+            }
             st.gates.entry(id).or_default().busy = true;
             prepared
         };

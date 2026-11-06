@@ -17,11 +17,31 @@ const EXIT_DRAIN: Duration = Duration::from_millis(200);
 /// Output queued for a core that reads slowly before programs have to wait for it.
 const BACKLOG_BYTES: usize = 8 << 20;
 
+fn tracked_write(writer: &mut impl Write, input: &proto::TrackedInput) -> proto::InputWritten {
+    let mut ack = proto::InputWritten { token: input.token.clone(), written: 0, complete: false, error: None };
+    while ack.written < input.bytes.len() {
+        match writer.write(&input.bytes[ack.written..]) {
+            Ok(0) => {
+                ack.error = Some("PTY accepted zero bytes".into());
+                return ack;
+            }
+            Ok(n) => ack.written += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                ack.error = Some(e.to_string());
+                return ack;
+            }
+        }
+    }
+    ack.complete = true;
+    ack
+}
+
 struct Term {
     pid: u32,
     pty: Arc<Pty>,
     /// Input goes through its own thread: a program that stops reading blocks only itself.
-    input: std::sync::mpsc::Sender<Vec<u8>>,
+    input: std::sync::mpsc::Sender<InputJob>,
     cols: u16,
     rows: u16,
     tail: VecDeque<u8>,
@@ -32,6 +52,11 @@ struct Term {
     drains_since: Option<Instant>,
     /// Its `HC_SCOPE` token: what it started carries it too.
     scope: Option<String>,
+}
+
+enum InputJob {
+    Raw(Vec<u8>),
+    Tracked(proto::TrackedInput),
 }
 
 /// The connected core. Frames go out through its own writer thread: a core
@@ -259,7 +284,22 @@ impl Holder {
                 proto::SPAWN => self.spawn(id, proto::parse(&payload)?),
                 proto::INPUT => {
                     if let Some(t) = self.lock().terms.get(&id) {
-                        let _ = t.input.send(payload);
+                        let _ = t.input.send(InputJob::Raw(payload));
+                    }
+                }
+                proto::TRACKED_INPUT => {
+                    let input: proto::TrackedInput = proto::parse(&payload)?;
+                    let mut st = self.lock();
+                    if let Some(t) = st.terms.get(&id).filter(|t| t.exit.is_none() && t.pid == input.pid) {
+                        let _ = t.input.send(InputJob::Tracked(input));
+                    } else {
+                        let ack = proto::InputWritten {
+                            token: input.token,
+                            written: 0,
+                            complete: false,
+                            error: Some("target ended or changed".into()),
+                        };
+                        self.to_core(&mut st, &proto::json_frame(proto::INPUT_WRITTEN, id, &ack));
                     }
                 }
                 proto::RESIZE => {
@@ -350,11 +390,39 @@ impl Holder {
             }
             Ok((reader, mut writer, pty, child)) => {
                 let pid = child.id();
-                let (input, queued) = std::sync::mpsc::channel::<Vec<u8>>();
+                let (input, queued) = std::sync::mpsc::channel::<InputJob>();
+                let writing_holder = self.clone();
                 std::thread::spawn(move || {
-                    for bytes in queued {
-                        if writer.write_all(&bytes).is_err() {
-                            break;
+                    for job in queued {
+                        match job {
+                            InputJob::Raw(bytes) => {
+                                if writer.write_all(&bytes).is_err() {
+                                    break;
+                                }
+                            }
+                            InputJob::Tracked(input) => {
+                                let live = writing_holder
+                                    .lock()
+                                    .terms
+                                    .get(&id)
+                                    .is_some_and(|t| t.exit.is_none() && t.pid == input.pid);
+                                let ack = if live {
+                                    tracked_write(&mut writer, &input)
+                                } else {
+                                    proto::InputWritten {
+                                        token: input.token,
+                                        written: 0,
+                                        complete: false,
+                                        error: Some("target ended before write".into()),
+                                    }
+                                };
+                                let complete = ack.complete;
+                                let mut st = writing_holder.lock();
+                                writing_holder.to_core(&mut st, &proto::json_frame(proto::INPUT_WRITTEN, id, &ack));
+                                if !complete {
+                                    break;
+                                }
+                            }
                         }
                     }
                 });
@@ -481,5 +549,34 @@ impl Holder {
                 eprintln!("holder: cannot start core: {e:?}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tracked_tests {
+    use super::*;
+    #[test]
+    fn observes_partial_failure_and_full_write() {
+        struct Fails(usize);
+        impl Write for Fails {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if self.0 == 0 {
+                    return Err(io::Error::other("broken"));
+                }
+                let n = self.0.min(bytes.len());
+                self.0 -= n;
+                Ok(n)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let input = proto::TrackedInput { token: "test".into(), pid: 1, bytes: "中文\n🙂".as_bytes().to_vec() };
+        let partial = tracked_write(&mut Fails(3), &input);
+        assert_eq!(partial.written, 3);
+        assert!(!partial.complete);
+        let mut all = Vec::new();
+        assert!(tracked_write(&mut all, &input).complete);
+        assert_eq!(all, input.bytes);
     }
 }

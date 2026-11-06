@@ -53,6 +53,9 @@ pub struct State {
     pub events: crate::events::Events,
     pub gates: HashMap<u32, crate::input::Gate>,
     pub queues: HashMap<u32, Arc<tokio::sync::Mutex<()>>>,
+    pub tracked_writes: HashMap<String, oneshot::Sender<proto::InputWritten>>,
+    pub active_submissions: HashSet<String>,
+    pub submission_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
     pub foreground: HashMap<u32, Vec<oneshot::Sender<i32>>>,
     /// Waits matching output: they get every byte viewers get.
     pub output_watch: HashMap<u32, Vec<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>,
@@ -611,6 +614,13 @@ impl Core {
             let mut st = self.lock();
             match kind {
                 proto::OUTPUT => self.output(&mut st, id, &payload),
+                proto::INPUT_WRITTEN => {
+                    if let Ok(ack) = proto::parse::<proto::InputWritten>(&payload)
+                        && let Some(tx) = st.tracked_writes.remove(&ack.token)
+                    {
+                        let _ = tx.send(ack);
+                    }
+                }
                 proto::SPAWNED | proto::SPAWN_FAILED => {
                     let result = if kind == proto::SPAWNED {
                         proto::parse::<proto::Spawned>(&payload).map(|s| s.pid).map_err(|e| e.to_string())

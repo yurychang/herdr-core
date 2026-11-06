@@ -14,7 +14,7 @@ use std::time::Duration;
 
 pub const GENERATION: u32 = 1;
 pub const FEATURES: &[&str] =
-    &["framed", "attach", "events", "status", "shell", "resize_notifications", "automatic_input"];
+    &["framed", "attach", "events", "status", "shell", "resize_notifications", "automatic_input", "durable_submit_v1"];
 pub const FINISHED_LINES: usize = 1000;
 /// A terminal's identity: fixed at start from whoever starts it.
 pub const IDENTITY_VARS: &[&str] = &["TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "COLORTERM"];
@@ -24,6 +24,9 @@ mod run;
 mod types;
 use doc::*;
 mod waiting;
+use crate::submission::{
+    InputStopParams, InputStopResult, InputTarget, Receipt, ReceiptParams, ResolveParams, SubmitParams,
+};
 use run::*;
 pub(crate) use run::{child_env, not_stopping, tail, terminal_env};
 pub use types::*;
@@ -95,6 +98,16 @@ methods! { Ctx<'_>;
     "terminal.attach" => terminal_attach, AttachParams => AttachResult,
         "Open a raw stream to a live terminal on this framed connection (see `hello` with `framed`). Loss ends the stream even when kept; reattach after the restarted event.",
         errors ["not_found", "machine_unknown", "finished", "unavailable", "needs_framed"];
+    "terminal.input_target" => terminal_input_target, TerminalParams => InputTarget,
+        "Snapshot local process/session identity and input revision for a guarded submission.", errors ["not_found", "unavailable", "needs_update", "invalid_params"];
+    "terminal.input_stop" => terminal_input_stop, InputStopParams => InputStopResult,
+        "Guard the process/session/input revision under its input queue and write its stop key. Written is not proof the program stopped.", errors ["invalid_params", "target_changed", "input_changed", "unavailable", "unknown"];
+    "terminal.submit" => terminal_submit, SubmitParams => Receipt,
+        "Durably deduplicate a guarded paste plus Enter; PTY written is not agent accepted. Never automatically replay unknown results.", errors ["invalid_params", "id_conflict", "io"];
+    "terminal.submission" => terminal_submission, ReceiptParams => Receipt,
+        "Query a durable submission receipt. Interrupted pending writes are unknown, not safe to retry.", errors ["invalid_params", "not_found", "io"];
+    "terminal.submission.resolve" => terminal_submission_resolve, ResolveParams => Receipt,
+        "After explicit native-terminal review, unlock a previous unknown submission without replaying it.", errors ["invalid_params", "not_found", "pending", "io"];
     "terminal.send" => terminal_send, SendParams => SendResult,
         "Paste text and press Enter, once nobody has typed for ~3 s; keys a person presses meanwhile are held, then delivered. Refuses a blocked program unless `force`.",
         errors ["not_found", "machine_unknown", "finished", "unavailable", "blocked", "status_mismatch", "invalid_params", "config"];
@@ -487,6 +500,22 @@ async fn terminal_send(core: Ctx<'_>, p: SendParams) -> Result<SendResult, RpcEr
     };
     core.flush_saved().await?;
     Ok(SendResult { status: sent.status, turn: sent.turn, started: sent.started, wait })
+}
+
+async fn terminal_input_target(core: Ctx<'_>, p: TerminalParams) -> Result<InputTarget, RpcError> {
+    core.input_target(&p.terminal)
+}
+async fn terminal_input_stop(core: Ctx<'_>, p: InputStopParams) -> Result<InputStopResult, RpcError> {
+    core.input_stop(p).await
+}
+async fn terminal_submit(core: Ctx<'_>, p: SubmitParams) -> Result<Receipt, RpcError> {
+    core.submit(p).await
+}
+async fn terminal_submission(core: Ctx<'_>, p: ReceiptParams) -> Result<Receipt, RpcError> {
+    core.submission_receipt(&p.id).await
+}
+async fn terminal_submission_resolve(core: Ctx<'_>, p: ResolveParams) -> Result<Receipt, RpcError> {
+    core.resolve_submission(p).await
 }
 
 async fn machine_exec(core: Ctx<'_>, p: ExecParams) -> Result<ExecResult, RpcError> {

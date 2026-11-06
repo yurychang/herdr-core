@@ -29,6 +29,7 @@ pub mod runtime;
 pub mod server;
 pub mod status;
 pub mod stitch;
+pub mod submission;
 pub mod sweep;
 pub mod templates;
 pub mod terminals;

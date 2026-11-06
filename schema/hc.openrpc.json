@@ -401,6 +401,71 @@
         ],
         "type": "object"
       },
+      "InputStopResult": {
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "key"
+        ],
+        "type": "object"
+      },
+      "InputTarget": {
+        "properties": {
+          "core": {
+            "type": "string"
+          },
+          "holder": {
+            "type": "string"
+          },
+          "input_revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pid": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session": {
+            "description": "Optional generic input.session label, owned by the client.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "started_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "terminal": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "core",
+          "terminal",
+          "holder",
+          "pid",
+          "started_ms",
+          "input_revision"
+        ],
+        "type": "object"
+      },
       "InterruptResult": {
         "properties": {
           "key": {
@@ -646,6 +711,42 @@
         ],
         "type": "object"
       },
+      "Receipt": {
+        "properties": {
+          "created_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request": {
+            "$ref": "#/components/schemas/SubmitParams"
+          },
+          "resolved": {
+            "type": "boolean"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "state": {
+            "description": "pending, written, rejected, unknown; never implies agent acceptance.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request",
+          "state",
+          "stage",
+          "created_ms",
+          "resolved"
+        ],
+        "type": "object"
+      },
       "RemoveResult": {
         "properties": {
           "removed": {
@@ -728,6 +829,13 @@
             "default": "",
             "description": "Which terminal the program believes it runs in (TERM_PROGRAM and\nversion), fixed at start; XTVERSION answers with it.",
             "type": "string"
+          },
+          "input_revision": {
+            "default": 0,
+            "description": "Input received from viewers or automatic send/keys, for optimistic input ownership.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
           },
           "keep": {
             "default": false,
@@ -1060,6 +1168,26 @@
         ],
         "type": "object"
       },
+      "SubmitParams": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/InputTarget"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "target",
+          "text"
+        ],
+        "type": "object"
+      },
       "SubscribeResult": {
         "properties": {
           "channel": {
@@ -1202,6 +1330,13 @@
             "default": "",
             "description": "Which terminal the program believes it runs in (TERM_PROGRAM and\nversion), fixed at start; XTVERSION answers with it.",
             "type": "string"
+          },
+          "input_revision": {
+            "default": 0,
+            "description": "Input received from viewers or automatic send/keys, for optimistic input ownership.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
           },
           "keep": {
             "default": false,
@@ -2378,6 +2513,284 @@
         "name": "result",
         "schema": {
           "$ref": "#/components/schemas/AttachResult"
+        }
+      }
+    },
+    {
+      "description": "Snapshot local process/session identity and input revision for a guarded submission.",
+      "errors": [
+        {
+          "code": -32000,
+          "data": {
+            "kind": "not_found"
+          },
+          "message": "not_found"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "unavailable"
+          },
+          "message": "unavailable"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "needs_update"
+          },
+          "message": "needs_update"
+        },
+        {
+          "code": -32602,
+          "data": {
+            "kind": "invalid_params"
+          },
+          "message": "invalid_params"
+        }
+      ],
+      "name": "terminal.input_target",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "description": "Who is calling; a parent looking at its child has seen its news.",
+          "name": "caller",
+          "required": false,
+          "schema": {
+            "description": "Who is calling; a parent looking at its child has seen its news.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
+          "description": "The terminal: `t7`, a name, or `machine/t7`.",
+          "name": "terminal",
+          "required": true,
+          "schema": {
+            "description": "The terminal: `t7`, a name, or `machine/t7`.",
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/InputTarget"
+        }
+      }
+    },
+    {
+      "description": "Guard the process/session/input revision under its input queue and write its stop key. Written is not proof the program stopped.",
+      "errors": [
+        {
+          "code": -32602,
+          "data": {
+            "kind": "invalid_params"
+          },
+          "message": "invalid_params"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "target_changed"
+          },
+          "message": "target_changed"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "input_changed"
+          },
+          "message": "input_changed"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "unavailable"
+          },
+          "message": "unavailable"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "unknown"
+          },
+          "message": "unknown"
+        }
+      ],
+      "name": "terminal.input_stop",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "target",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/InputTarget"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/InputStopResult"
+        }
+      }
+    },
+    {
+      "description": "Durably deduplicate a guarded paste plus Enter; PTY written is not agent accepted. Never automatically replay unknown results.",
+      "errors": [
+        {
+          "code": -32602,
+          "data": {
+            "kind": "invalid_params"
+          },
+          "message": "invalid_params"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "id_conflict"
+          },
+          "message": "id_conflict"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "io"
+          },
+          "message": "io"
+        }
+      ],
+      "name": "terminal.submit",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "target",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/InputTarget"
+          }
+        },
+        {
+          "name": "text",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Receipt"
+        }
+      }
+    },
+    {
+      "description": "Query a durable submission receipt. Interrupted pending writes are unknown, not safe to retry.",
+      "errors": [
+        {
+          "code": -32602,
+          "data": {
+            "kind": "invalid_params"
+          },
+          "message": "invalid_params"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "not_found"
+          },
+          "message": "not_found"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "io"
+          },
+          "message": "io"
+        }
+      ],
+      "name": "terminal.submission",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Receipt"
+        }
+      }
+    },
+    {
+      "description": "After explicit native-terminal review, unlock a previous unknown submission without replaying it.",
+      "errors": [
+        {
+          "code": -32602,
+          "data": {
+            "kind": "invalid_params"
+          },
+          "message": "invalid_params"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "not_found"
+          },
+          "message": "not_found"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "pending"
+          },
+          "message": "pending"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "io"
+          },
+          "message": "io"
+        }
+      ],
+      "name": "terminal.submission.resolve",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "reviewed",
+          "required": true,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Receipt"
         }
       }
     },

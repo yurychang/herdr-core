@@ -32,6 +32,9 @@ pub struct Terminal {
     pub restart_delay_ms: u64,
     #[serde(default)]
     pub program_started_ms: Option<u64>,
+    /// Input received from viewers or automatic send/keys, for optimistic input ownership.
+    #[serde(default)]
+    pub input_revision: u64,
     /// "live" or "finished".
     pub state: String,
     pub pid: Option<u32>,
@@ -267,6 +270,7 @@ impl Registry {
                 restart_after_ms: 0,
                 restart_delay_ms: 0,
                 program_started_ms: None,
+                input_revision: 0,
                 state: "live".into(),
                 pid: None,
                 exit_code: None,

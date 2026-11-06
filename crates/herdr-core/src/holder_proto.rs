@@ -21,6 +21,8 @@ pub const GOODBYE: u8 = 7;
 pub const FOREGROUND: u8 = 8;
 /// An older build: take no new terminals, exit once the last one is gone.
 pub const DRAIN: u8 = 9;
+/// A single write whose completion must be observed, never replayed.
+pub const TRACKED_INPUT: u8 = 10;
 // holder → core
 pub const WELCOME: u8 = 101;
 pub const TAIL: u8 = 102;
@@ -30,6 +32,22 @@ pub const SPAWN_FAILED: u8 = 105;
 pub const EXITED: u8 = 106;
 pub const BYE: u8 = 107;
 pub const FOREGROUND_IS: u8 = 108;
+pub const INPUT_WRITTEN: u8 = 109;
+
+#[derive(Serialize, Deserialize)]
+pub struct TrackedInput {
+    pub token: String,
+    pub pid: u32,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct InputWritten {
+    pub token: String,
+    pub written: usize,
+    pub complete: bool,
+    pub error: Option<String>,
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct Hello {

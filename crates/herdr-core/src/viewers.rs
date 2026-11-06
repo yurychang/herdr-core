@@ -259,6 +259,13 @@ impl Core {
             self.touch(&mut st, conn, channel, |_| {})
         };
         if let Some(id) = id {
+            if !automatic
+                && !bytes.is_empty()
+                && let Some(t) = st.reg.terminals.get_mut(&id)
+            {
+                t.input_revision = t.input_revision.saturating_add(1);
+                self.save_soon();
+            }
             let now = st.gates.entry(id).or_default().viewer(bytes, !automatic);
             if let Some(link) = st.link(id) {
                 link.input(id, &now);
