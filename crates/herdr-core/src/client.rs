@@ -23,7 +23,43 @@ pub fn remember_exe() {
 /// compatibility marker when its folder isn't writable. None for a replaceable install.
 pub fn installed_by() -> Option<&'static str> {
     let exe = EXE.get().cloned().or_else(|| std::env::current_exe().ok())?;
+    static DECLARED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    if let Some(manager) = DECLARED.get_or_init(|| declared_manager(&exe)).as_deref() {
+        return Some(manager);
+    }
     installed_by_path(&exe)
+}
+
+/// An external distributor can own updates without matching a hard-coded path.
+fn declared_manager(exe: &std::path::Path) -> Option<String> {
+    let marker = exe.parent()?.join("herdr-core.package-manager");
+    match std::fs::read_to_string(marker) {
+        Ok(value) => {
+            let value = value.trim();
+            Some(if !value.is_empty() && value.len() <= 80 && !value.chars().any(char::is_control) {
+                value.to_owned()
+            } else {
+                "external package manager".into()
+            })
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => Some("external package manager".into()),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn an_external_distributor_can_declare_update_ownership() {
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let root = std::env::temp_dir().join(format!("hc-package-owner-{}-{stamp}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let exe = root.join("herdr-core.exe");
+    assert_eq!(declared_manager(&exe), None);
+    std::fs::write(root.join("herdr-core.package-manager"), "example-manager\n").unwrap();
+    assert_eq!(declared_manager(&exe).as_deref(), Some("example-manager"));
+    std::fs::write(root.join("herdr-core.package-manager"), "\n").unwrap();
+    assert_eq!(declared_manager(&exe).as_deref(), Some("external package manager"));
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 pub(crate) fn installed_by_path(exe: &std::path::Path) -> Option<&'static str> {

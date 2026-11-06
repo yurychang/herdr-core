@@ -47,29 +47,30 @@ pub(super) fn up_to_date(paths: &Paths, release: &str, human: String) -> Result<
     Ok(out)
 }
 
-/// Swaps the binary this hc runs from for `from`, then restarts the core
-/// the planned way: every terminal keeps running. One swap path, for people
-/// and for apps that bundle hc.
-pub(super) fn update(paths: &Paths, from: &std::path::Path, force: bool) -> Result<Out, RpcError> {
-    let source = crate::platform::update_source(from);
-    let from = source.as_path();
-    let refused = |why: String, hint: &str| RpcError::new("refused", why, hint);
-    let dest = std::env::current_exe().and_then(|e| e.canonicalize()).map_err(|e| RpcError::internal(e.to_string()))?;
-    let shown = dest.display().to_string();
+/// Check ownership before downloading or touching any release files.
+pub(super) fn allow_update() -> Result<(), RpcError> {
     if let Some(manager) = client::installed_by() {
         let how = match manager {
             "homebrew" => "brew upgrade herdr-core",
             "nix" => "update it in your Nix configuration",
             "mise" => "mise upgrade herdr-core",
-            _ => {
-                return Err(refused(
-                    format!("{} isn't writable by you", dest.parent().unwrap().display()),
-                    "update herdr-core the way it was installed (package manager, or sudo)",
-                ));
-            }
+            _ => "update herdr-core through its distributor or package manager",
         };
-        return Err(refused(format!("{shown} belongs to {manager}"), how));
+        return Err(RpcError::new("refused", format!("herdr-core belongs to {manager}"), how));
     }
+    Ok(())
+}
+
+/// Swaps the binary this hc runs from for `from`, then restarts the core
+/// the planned way: every terminal keeps running. One swap path, for people
+/// and for apps that bundle hc.
+pub(super) fn update(paths: &Paths, from: &std::path::Path, force: bool) -> Result<Out, RpcError> {
+    allow_update()?;
+    let source = crate::platform::update_source(from);
+    let from = source.as_path();
+    let refused = |why: String, hint: &str| RpcError::new("refused", why, hint);
+    let dest = std::env::current_exe().and_then(|e| e.canonicalize()).map_err(|e| RpcError::internal(e.to_string()))?;
+    let shown = dest.display().to_string();
     let was = format!("hc {}", env!("CARGO_PKG_VERSION"));
     let now = version_of(from).ok_or_else(|| refused(format!("{} is not a working hc", from.display()), ""))?;
     if older(&now, &was) && !force {

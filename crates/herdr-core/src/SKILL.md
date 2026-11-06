@@ -268,3 +268,6 @@ paths start at your current folder. Prefer explicit paths for remote work.
   3 not_found, 7 needs_target, 9 blocked, 10 status_mismatch, 11 finished.
 - Codex must run with `--no-daemon` (including templates), or its commands
   execute outside hc.
+External bundles can place `herdr-core.package-manager` beside the executable,
+containing the distributor's name. Core reports that owner in `installed_by` and
+refuses self-update, so the distributor can keep a tested runtime pair together.

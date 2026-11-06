@@ -579,6 +579,7 @@ fn run(cmd: Option<Cmd>, json: bool, asked: bool) -> Result<Option<Out>, RpcErro
         }
         Cmd::Server { action: ServerCmd::Stop } => stop(&paths)?,
         Cmd::Update { from: None, version, force } => {
+            allow_update()?;
             let this = format!("hc {}", env!("CARGO_PKG_VERSION"));
             if let Some(v) = &version
                 && !force
